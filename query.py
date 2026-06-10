@@ -101,9 +101,14 @@ def main():
             print("\nSources used:")
             sources = set()
             for doc in response.get("context", []):
-                filename = doc.metadata.get("filename", "Unknown")
+                title = doc.metadata.get("recipe_title")
+                creator = doc.metadata.get("recipe_creator")
                 source_type = doc.metadata.get("source_type", "Unknown")
-                sources.add(f"- {filename} ({source_type})")
+                if title and creator:
+                    sources.add(f"- {title} por {creator} ({source_type})")
+                else:
+                    filename = doc.metadata.get("filename", "Unknown")
+                    sources.add(f"- {filename} ({source_type})")
             
             for source in sources:
                 print(source)

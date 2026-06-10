@@ -16,7 +16,15 @@ from config import (
     CHROMA_DB_PATH,
     OLLAMA_MODEL_NAME,
     OLLAMA_BASE_URL,
-    TEMP_DATA_DIR
+    TEMP_DATA_DIR,
+    GOOGLE_CREDENTIALS_PATH,
+    GOOGLE_TOKEN_PATH,
+    GOOGLE_DRIVE_FOLDER_ID,
+    DROPBOX_APP_KEY,
+    DROPBOX_APP_SECRET,
+    DROPBOX_REFRESH_TOKEN,
+    DROPBOX_FOLDER_PATH,
+    update_env
 )
 from query import get_embedding_model, get_llm
 from langchain_core.prompts import ChatPromptTemplate
@@ -98,21 +106,16 @@ st.markdown("""
         /* Recipe card layout styling */
         .recipe-card {
             background-color: #ffffff;
-            padding: 22px;
-            border-radius: 16px;
-            box-shadow: 0 4px 15px rgba(127, 85, 57, 0.06);
+            padding: 22px 22px 10px 22px;
+            border-radius: 16px 16px 0 0;
+            box-shadow: 0 4px 15px rgba(127, 85, 57, 0.04);
             border-left: 6px solid #b08968;
-            margin-bottom: 20px;
+            margin-bottom: 0px;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         
-        .recipe-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(127, 85, 57, 0.12);
-        }
-        
         .recipe-card h3 {
-            margin: 0 0 10px 0;
+            margin: 0 0 4px 0;
             color: #7f5539;
             font-size: 1.35rem;
         }
@@ -177,6 +180,55 @@ st.markdown("""
             margin-top: 8px;
             font-weight: 500;
         }
+        
+        /* Expander custom border mapping for card bottoms */
+        .stDetailsExpander {
+            border-radius: 0 0 16px 16px !important;
+            border: 1px solid #e6ccb2 !important;
+            border-top: none !important;
+            margin-bottom: 20px;
+        }
+
+        /* Custom legible button styles using Pink, Turquoise, Brown, and White */
+        .stButton > button {
+            background-color: #ffccd5 !important; /* Pastel pink */
+            color: #43281c !important; /* Dark brown text for high readability */
+            border: 2px solid #7f5539 !important; /* Brown border */
+            border-radius: 10px !important;
+            padding: 8px 16px !important;
+            font-weight: 700 !important;
+            font-size: 0.95rem !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 6px rgba(127, 85, 57, 0.05) !important;
+            width: 100% !important;
+        }
+        
+        .stButton > button:hover {
+            background-color: #2ec4b6 !important; /* Turquoise on hover */
+            color: #ffffff !important; /* White text on hover */
+            border-color: #00a896 !important; /* Deep turquoise border */
+            box-shadow: 0 6px 14px rgba(46, 196, 182, 0.25) !important;
+            transform: translateY(-1px) !important;
+        }
+
+        .stButton > button:active {
+            transform: translateY(1px) !important;
+            box-shadow: 0 2px 4px rgba(46, 196, 182, 0.1) !important;
+        }
+
+        /* Sidebar buttons override (reindexing button) */
+        [data-testid="stSidebar"] .stButton > button {
+            background-color: #2ec4b6 !important; /* Turquoise */
+            color: #ffffff !important; /* White text */
+            border: 2px solid #00a896 !important; /* Deep turquoise border */
+        }
+        
+        [data-testid="stSidebar"] .stButton > button:hover {
+            background-color: #ffccd5 !important; /* Pink on hover */
+            color: #43281c !important; /* Brown text on hover */
+            border-color: #7f5539 !important; /* Brown border */
+            box-shadow: 0 6px 14px rgba(255, 204, 213, 0.35) !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -215,7 +267,9 @@ def get_indexed_documents(vectorstore):
             if filename:
                 unique_docs[filename] = {
                     "category": meta.get("category", "others"),
-                    "source_type": meta.get("source_type", "Local")
+                    "source_type": meta.get("source_type", "Local"),
+                    "recipe_title": meta.get("recipe_title", filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ').title()),
+                    "recipe_creator": meta.get("recipe_creator", "Desconocido")
                 }
         
         return [{"filename": name, **info} for name, info in unique_docs.items()]
@@ -284,7 +338,7 @@ vectorstore = get_vectorstore()
 documents = get_indexed_documents(vectorstore)
 
 # Create layout tabs
-tab_chat, tab_catalog = st.tabs(["💬 Chat y Ayuda de YouTube", "📚 Catálogo de Recetas"])
+tab_chat, tab_catalog, tab_settings = st.tabs(["💬 Chat y Ayuda de YouTube", "📚 Catálogo de Recetas", "⚙️ Configuración"])
 
 # TAB 1: Chat and YouTube Helper
 with tab_chat:
@@ -392,8 +446,12 @@ with tab_chat:
             # Gather sources
             sources = set()
             for doc in response.get("context", []):
-                filename = doc.metadata.get("filename", "Unknown")
-                sources.add(filename)
+                recipe_title = doc.metadata.get("recipe_title")
+                recipe_creator = doc.metadata.get("recipe_creator")
+                if recipe_title and recipe_creator:
+                    sources.add(f"{recipe_title} (por {recipe_creator})")
+                else:
+                    sources.add(doc.metadata.get("filename", "Unknown"))
                 
             st.session_state.messages.append({
                 "role": "assistant",
@@ -425,7 +483,7 @@ with tab_chat:
 # TAB 2: Library Catalog
 with tab_catalog:
     st.markdown("### 📚 Recetas y Ebooks Indexados")
-    st.markdown("A continuación verás el catálogo de todos los documentos indexados en tu base de datos local. Puedes filtrar por categoría o buscar por nombre de archivo.")
+    st.markdown("A continuación verás el catálogo de todos los documentos indexados en tu base de datos local. Puedes filtrar por categoría o buscar por nombre de archivo o título de receta.")
     
     if not documents:
         st.warning("Aún no se han indexado documentos. Sube tus PDFs a Dropbox/Drive, o cópialos directamente a la carpeta `temp_downloads/` y haz clic en 'Sincronizar y Reindexar PDFs' en la barra lateral.")
@@ -433,7 +491,7 @@ with tab_catalog:
         # Search and Category filter for the list
         col_search, col_cat = st.columns([2, 1])
         with col_search:
-            search_query = st.text_input("🔍 Buscar documentos por nombre:", placeholder="ej. bizcocho, keto...")
+            search_query = st.text_input("🔍 Buscar recetas por nombre o creador:", placeholder="ej. Torta de Vainilla, Juliana Postres...")
         with col_cat:
             catalog_categories = ["Todas"] + sorted(list(set(doc["category"] for doc in documents)))
             selected_cat = st.selectbox("📂 Filtrar catálogo por categoría:", options=catalog_categories)
@@ -441,7 +499,12 @@ with tab_catalog:
         # Filter documents based on inputs
         filtered_docs = documents
         if search_query:
-            filtered_docs = [d for d in filtered_docs if search_query.lower() in d["filename"].lower()]
+            filtered_docs = [
+                d for d in filtered_docs 
+                if search_query.lower() in d["filename"].lower() or 
+                   search_query.lower() in d["recipe_title"].lower() or 
+                   search_query.lower() in d["recipe_creator"].lower()
+            ]
         if selected_cat != "Todas":
             filtered_docs = [d for d in filtered_docs if d["category"].lower() == selected_cat.lower()]
             
@@ -449,7 +512,7 @@ with tab_catalog:
         if not filtered_docs:
             st.info("Ningún documento coincide con los criterios de búsqueda.")
         else:
-            st.markdown(f"Mostrando **{len(filtered_docs)}** documentos:")
+            st.markdown(f"Mostrando **{len(filtered_docs)}** recetas:")
             
             # Display documents in grid format
             cols_per_row = 3
@@ -462,11 +525,153 @@ with tab_catalog:
                         
                         card_html = f"""
                         <div class="recipe-card">
-                            <h3>{doc['filename']}</h3>
+                            <h3>{doc['recipe_title']}</h3>
+                            <div style="font-size: 0.95rem; color: #7f5539; margin-bottom: 12px; font-weight: 500;">
+                                🧑‍🍳 Creador: {doc['recipe_creator']}
+                            </div>
                             <div>
                                 <span class="badge {badge_class}">{doc['category']}</span>
                                 <span class="badge badge-source">{doc['source_type']}</span>
                             </div>
                         </div>
                         """
-                        cols[j].markdown(card_html, unsafe_allow_html=True)
+                        with cols[j]:
+                            st.markdown(card_html, unsafe_allow_html=True)
+                            with st.container():
+                                with st.expander("🔍 Ver detalles del archivo PDF", expanded=False):
+                                    st.markdown(f"**Archivo PDF:** `{doc['filename']}`")
+                                    st.markdown(f"**Fuente de Origen:** {doc['source_type']}")
+
+# TAB 3: Settings Configuration
+with tab_settings:
+    st.markdown("### ⚙️ Configuración del Agente y Fuentes Nube")
+    st.markdown("Configura las credenciales de tus fuentes de nube (Google Drive y Dropbox) y selecciona el modelo de Ollama que deseas utilizar.")
+    
+    col_settings_left, col_settings_right = st.columns(2)
+    
+    with col_settings_left:
+        st.markdown("#### 1. Conexión a Google Drive")
+        
+        # Check Google credentials status
+        google_creds_exist = os.path.exists(GOOGLE_CREDENTIALS_PATH)
+        google_token_exist = os.path.exists(GOOGLE_TOKEN_PATH)
+        
+        if google_creds_exist:
+            st.success("✅ Archivo `credentials.json` cargado correctamente.")
+        else:
+            st.warning("⚠️ No se ha detectado el archivo `credentials.json`. Súbelo a continuación.")
+            
+        if google_token_exist:
+            st.info("ℹ️ Sesión OAuth autorizada activa (archivo `token.json` presente).")
+            
+        # File uploader for credentials.json
+        credentials_file = st.file_uploader(
+            "Cargar archivo credentials.json de Google Cloud:", 
+            type=["json"],
+            help="Sube el archivo JSON que descargaste de la Google Cloud Console para activar la API de Drive."
+        )
+        
+        drive_folder_id = st.text_input(
+            "ID de la Carpeta de Google Drive con Recetas:",
+            value=GOOGLE_DRIVE_FOLDER_ID or "",
+            placeholder="Introduce el ID largo de la carpeta de Drive..."
+        )
+        
+        st.markdown("---")
+        st.markdown("#### 2. Conexión a Dropbox")
+        
+        dbx_app_key = st.text_input(
+            "Dropbox App Key:",
+            value=DROPBOX_APP_KEY or "",
+            placeholder="App Key de tu aplicación Dropbox..."
+        )
+        
+        dbx_app_secret = st.text_input(
+            "Dropbox App Secret:",
+            value=DROPBOX_APP_SECRET or "",
+            type="password",
+            placeholder="App Secret de tu aplicación Dropbox..."
+        )
+        
+        dbx_refresh_token = st.text_input(
+            "Dropbox Refresh Token:",
+            value=DROPBOX_REFRESH_TOKEN or "",
+            type="password",
+            placeholder="Refresh Token para tokens de larga duración..."
+        )
+        
+        dbx_folder_path = st.text_input(
+            "Ruta de la Carpeta en Dropbox:",
+            value=DROPBOX_FOLDER_PATH or "/recetas",
+            placeholder="ej. /recetas o /"
+        )
+        
+    with col_settings_right:
+        st.markdown("#### 3. Cerebro del Asistente (Ollama)")
+        
+        # Fetch local Ollama models list
+        ollama_models = ["llama3", "llama3.2", "phi3"]
+        try:
+            import urllib.request
+            import json
+            with urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=1.5) as response:
+                tags_data = json.loads(response.read().decode())
+                local_names = [m["name"] for m in tags_data.get("models", [])]
+                if local_names:
+                    ollama_models = local_names
+        except Exception:
+            st.caption("⚠️ No se pudo conectar a Ollama para listar los modelos. Asegúrate de que Ollama está abierto.")
+            
+        selected_model = st.selectbox(
+            "Seleccionar Modelo Local (Ollama):",
+            options=ollama_models,
+            index=ollama_models.index(OLLAMA_MODEL_NAME) if OLLAMA_MODEL_NAME in ollama_models else 0,
+            help="El modelo que usará el chat para responderte."
+        )
+        
+        ollama_base_url = st.text_input(
+            "Dirección URL de Ollama:",
+            value=OLLAMA_BASE_URL,
+            placeholder="Normalmente http://localhost:11434"
+        )
+        
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        
+        # Save Configuration Button
+        if st.button("💾 Guardar Configuración", use_container_width=True):
+            config_updates = {
+                "GOOGLE_DRIVE_FOLDER_ID": drive_folder_id.strip(),
+                "DROPBOX_APP_KEY": dbx_app_key.strip(),
+                "DROPBOX_APP_SECRET": dbx_app_secret.strip(),
+                "DROPBOX_REFRESH_TOKEN": dbx_refresh_token.strip(),
+                "DROPBOX_FOLDER_PATH": dbx_folder_path.strip(),
+                "OLLAMA_MODEL_NAME": selected_model,
+                "OLLAMA_BASE_URL": ollama_base_url.strip()
+            }
+            
+            # Save credentials file if uploaded
+            credentials_saved = False
+            if credentials_file is not None:
+                try:
+                    creds_path = Path(GOOGLE_CREDENTIALS_PATH)
+                    creds_path.parent.mkdir(parents=True, exist_ok=True)
+                    creds_path.write_bytes(credentials_file.read())
+                    credentials_saved = True
+                except Exception as e:
+                    st.error(f"Error al guardar credentials.json: {e}")
+            
+            try:
+                update_env(config_updates)
+                
+                success_msg = "¡Configuración de variables guardada con éxito en el archivo `.env`!"
+                if credentials_saved:
+                    success_msg += " Además, se guardó el archivo `credentials.json` correctamente."
+                
+                st.success(success_msg)
+                
+                # Delay for a moment to let the user see the success, then rerun
+                import time
+                time.sleep(1.5)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar configuración: {e}")

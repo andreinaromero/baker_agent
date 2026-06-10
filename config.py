@@ -35,3 +35,31 @@ DROPBOX_FOLDER_PATH = os.getenv("DROPBOX_FOLDER_PATH", "/recipes")
 
 # Temporary Data Directory for downloads
 TEMP_DATA_DIR = str(BASE_DIR / "temp_downloads")
+
+def update_env(updates):
+    """Updates key-value pairs in the local .env file, preserving comments."""
+    env_path = BASE_DIR / ".env"
+    if not env_path.exists():
+        env_path.touch()
+    
+    lines = env_path.read_text().splitlines()
+    new_lines = []
+    keys_handled = set()
+    
+    for line in lines:
+        line_strip = line.strip()
+        if line_strip and not line_strip.startswith("#") and "=" in line_strip:
+            key = line_strip.split("=", 1)[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}")
+                keys_handled.add(key)
+                continue
+        new_lines.append(line)
+        
+    for key, val in updates.items():
+        if key not in keys_handled:
+            new_lines.append(f"{key}={val}")
+            
+    env_path.write_text("\n".join(new_lines) + "\n")
+    # Reload environment variables override
+    load_dotenv(override=True)
